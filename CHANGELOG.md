@@ -1,6 +1,8 @@
 # Unreleased
 
+- Find and clean linked git worktrees, including ones in hidden directories like `.claude/worktrees/` or nested inside another project. Worktrees are read from each repository's `.git/worktrees`; locked worktrees and worktrees outside the scanned directories are skipped. This is on by default, so kondo may list more projects than before. Use `--no-worktrees` for the previous behaviour.
 - Add PlatformIO support: projects with a `platformio.ini` have their `.pio` directory cleaned. A `platformio.ini` takes precedence over a `CMakeLists.txt` in the same directory, as in ESP-IDF projects.
+- kondo-lib 0.10.0: `ScanOptions` has a new `worktrees` field, and `ProjectType` has a new `PlatformIO` variant.
 
 # 0.8 2023-12-19
 

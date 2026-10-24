@@ -1,6 +1,6 @@
 [package]
 name = "kondo-lib"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["Trent Billington <trent.h.billington@gmail.com>"]
 edition = "2021"
 description = "Shared code lib for kondo and kondo-ui."
@@ -11,3 +11,6 @@ license = "MIT"
 [dependencies]
 ignore = "0.4.25"
 walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

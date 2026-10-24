@@ -26,6 +26,7 @@ fn options() -> ScanOptions {
     ScanOptions {
         follow_symlinks: false,
         same_file_system: true,
+        worktrees: true,
     }
 }
 
