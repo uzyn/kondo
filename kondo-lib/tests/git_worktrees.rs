@@ -42,6 +42,7 @@ fn scan_paths(root: &Path) -> Vec<PathBuf> {
         follow_symlinks: false,
         same_file_system: false,
         worktrees: true,
+        nested: true,
     };
     let mut paths: Vec<PathBuf> = scan(&root, &options)
         .map(|r| r.ok().expect("scan error").path)

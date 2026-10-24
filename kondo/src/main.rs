@@ -50,6 +50,10 @@ struct Opt {
     #[arg(long)]
     no_worktrees: bool,
 
+    /// Don't look for projects nested inside other projects.
+    #[arg(long)]
+    no_nested: bool,
+
     /// Only directories with a file last modified n units of time ago will be looked at. Ex: 20d. Units are m: minutes, h: hours, d: days, w: weeks, M: months and y: years.
     #[arg(short, long, value_parser = parse_age_filter, default_value = "0d")]
     older: u64,
@@ -352,6 +356,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         follow_symlinks: opt.follow_symlinks,
         same_file_system: opt.same_filesystem,
         worktrees: !opt.no_worktrees,
+        nested: !opt.no_nested,
     };
 
     let (proj_discover_send, proj_discover_recv) = std::sync::mpsc::sync_channel::<DiscoverData>(5);

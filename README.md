@@ -181,6 +181,12 @@ kondo --all --older 7d ~/code # clean without prompting, skipping anything touch
 kondo --no-worktrees ~/code # don't look for linked worktrees
 ```
 
+Projects nested inside other projects are found too, such as a Flutter `app/` or PlatformIO `firmware/` inside a Rust repository. kondo keeps looking inside a project, skipping its artifact directories, so each nested project is listed and cleaned on its own. Nested Python and Jupyter directories aren't listed separately, and neither is a nested project whose artifact directories its parent already cleans, like the `android/` Gradle project of a React Native app.
+
+```sh
+kondo --no-nested ~/code # stop looking at the first project found in each directory tree
+```
+
 More options such as quiet mode, following symlinks, and filesystem restriction are viewable with `kondo --help`.
 
 ## Building/Development
