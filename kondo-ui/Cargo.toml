@@ -33,4 +33,4 @@ rfd = "0.17.2"
 
 [dependencies.kondo-lib]
 path = "../kondo-lib"
-version = "0.9"
+version = "0.10"

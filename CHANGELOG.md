@@ -1,3 +1,8 @@
+# Unreleased
+
+- Find and clean linked git worktrees, including ones in hidden directories like `.claude/worktrees/` or nested inside another project. Worktrees are read from each repository's `.git/worktrees`; locked worktrees and worktrees outside the scanned directories are skipped. This is on by default, so kondo may list more projects than before. Use `--no-worktrees` for the previous behaviour.
+- kondo-lib 0.10.0: `ScanOptions` has a new `worktrees` field.
+
 # 0.8 2023-12-19
 
 - Add .NET (C# and F#) support by @mrivnak in https://github.com/tbillington/kondo/pull/106
