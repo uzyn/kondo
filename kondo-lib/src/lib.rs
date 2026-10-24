@@ -431,6 +431,9 @@ struct ProjectIter {
     pending: VecDeque<PathBuf>,
     queued: HashSet<PathBuf>,
     emitted: HashSet<PathBuf>,
+    /// Projects returned by the current walk that contain the current entry, with the
+    /// paths of their artifact directories.
+    parents: Vec<(PathBuf, Vec<PathBuf>)>,
 }
 
 impl ProjectIter {
@@ -456,6 +459,7 @@ impl ProjectIter {
             queued_walk: false,
             pending: VecDeque::new(),
             emitted: HashSet::new(),
+            parents: Vec::new(),
         }
     }
 
@@ -491,6 +495,23 @@ impl ProjectIter {
         };
         self.emitted.insert(key)
     }
+
+    fn is_parent_artifact(&self, path: &Path) -> bool {
+        self.parents
+            .iter()
+            .any(|(_, artifacts)| artifacts.iter().any(|a| a == path))
+    }
+
+    fn overlaps_parent_artifacts(&self, artifacts: &[PathBuf]) -> bool {
+        self.parents
+            .iter()
+            .flat_map(|(_, claimed)| claimed)
+            .any(|c| {
+                artifacts
+                    .iter()
+                    .any(|a| a.starts_with(c) || c.starts_with(a))
+            })
+    }
 }
 
 pub enum Red {
@@ -508,6 +529,7 @@ impl Iterator for ProjectIter {
                     let next_root = self.pending.pop_front()?;
                     self.it = walk(&next_root, &self.options);
                     self.queued_walk = true;
+                    self.parents.clear();
                     continue;
                 }
                 Some(Err(e)) => return Some(Err(Red::WalkdirError(e))),
@@ -517,6 +539,17 @@ impl Iterator for ProjectIter {
                 continue;
             }
             if is_hidden(&entry) && !(self.queued_walk && entry.depth() == 0) {
+                self.it.skip_current_dir();
+                continue;
+            }
+            while self
+                .parents
+                .last()
+                .is_some_and(|(parent, _)| !entry.path().starts_with(parent))
+            {
+                self.parents.pop();
+            }
+            if self.is_parent_artifact(entry.path()) {
                 self.it.skip_current_dir();
                 continue;
             }
@@ -544,6 +577,9 @@ impl Iterator for ProjectIter {
                     _ => {}
                 }
             }
+            // a git repository, submodule or worktree is a project root of its own
+            let in_project =
+                !self.parents.is_empty() && !listing.iter().any(|(name, _)| name == ".git");
             for dir_entry in listing
                 .iter()
                 .filter(|(_, file_type)| file_type.is_file())
@@ -604,16 +640,38 @@ impl Iterator for ProjectIter {
                     }
                     _ => None,
                 };
-                if let Some(project_type) = p_type {
+                let Some(project_type) = p_type else {
+                    continue;
+                };
+                if in_project && matches!(project_type, ProjectType::Python | ProjectType::Jupyter)
+                {
+                    continue;
+                }
+                let project = Project {
+                    project_type,
+                    path: entry.path().to_path_buf(),
+                };
+                if !self.options.nested {
                     self.it.skip_current_dir();
-                    if !self.first_emit(entry.path()) {
+                    if !self.first_emit(&project.path) {
                         break;
                     }
-                    return Some(Ok(Project {
-                        project_type,
-                        path: entry.path().to_path_buf(),
-                    }));
+                    return Some(Ok(project));
                 }
+                let artifacts: Vec<PathBuf> = project
+                    .artifact_dirs()
+                    .iter()
+                    .map(|dir| project.path.join(dir))
+                    .collect();
+                if self.overlaps_parent_artifacts(&artifacts) {
+                    break;
+                }
+                if !self.first_emit(&project.path) {
+                    self.it.skip_current_dir();
+                    break;
+                }
+                self.parents.push((project.path.clone(), artifacts));
+                return Some(Ok(project));
             }
         }
     }
@@ -651,6 +709,10 @@ pub struct ScanOptions {
     /// root, even when they live in hidden directories or inside another project.
     /// Locked worktrees are skipped, wherever they are found.
     pub worktrees: bool,
+    /// Keep looking for projects inside a project, outside of its artifact directories.
+    /// Nested Python and Jupyter projects are ignored, as is a nested project whose
+    /// artifact directories overlap those of a project containing it.
+    pub nested: bool,
 }
 
 pub fn scan<P: AsRef<path::Path>>(
@@ -814,6 +876,7 @@ mod tests {
             follow_symlinks: false,
             same_file_system: false,
             worktrees,
+            nested: true,
         }
     }
 
@@ -1157,5 +1220,175 @@ mod tests {
 
         let project = project_at(tmp.path(), &w1);
         assert_eq!(project.last_modified(&options(true)).unwrap(), future);
+    }
+
+    fn nested(nested: bool) -> ScanOptions {
+        ScanOptions {
+            nested,
+            ..options(false)
+        }
+    }
+
+    fn react_native_project(dir: &Path) {
+        write(&dir.join("package.json"), "{}");
+        write(&dir.join("node_modules/dep/index.js"), "");
+        write(&dir.join("android/build.gradle"), "");
+        write(&dir.join("android/build/outputs/app.apk"), "apk");
+        write(&dir.join("ios/Podfile"), "");
+        write(&dir.join("ios/Pods/Pod/lib.a"), "lib");
+    }
+
+    #[test]
+    fn nested_projects_inside_project() {
+        let tmp = tempdir();
+        let repo_dir = tmp.path().join("repo");
+        cargo_project(&repo_dir);
+        write(&repo_dir.join("app/pubspec.yaml"), "");
+        write(&repo_dir.join("app/build/out"), "artifact");
+        write(&repo_dir.join("firmware/platformio.ini"), "");
+        write(&repo_dir.join("firmware/.pio/build/fw.bin"), "artifact");
+
+        assert_eq!(
+            scan_paths(tmp.path(), &nested(true)),
+            [
+                repo_dir.clone(),
+                repo_dir.join("app"),
+                repo_dir.join("firmware")
+            ]
+        );
+        assert_eq!(scan_paths(tmp.path(), &nested(false)), [repo_dir]);
+    }
+
+    #[test]
+    fn nested_scan_skips_artifact_dirs() {
+        let tmp = tempdir();
+        let root = tmp.path().join("web");
+        write(&root.join("package.json"), "{}");
+        write(&root.join("node_modules/dep/package.json"), "{}");
+        write(
+            &root.join("node_modules/dep/node_modules/x/package.json"),
+            "{}",
+        );
+
+        assert_eq!(scan_paths(tmp.path(), &nested(true)), [root]);
+    }
+
+    #[test]
+    fn nested_scan_skips_multi_component_artifact_dirs() {
+        let tmp = tempdir();
+        let root = tmp.path().join("mobile");
+        react_native_project(&root);
+        write(&root.join("android/build/generated/package.json"), "{}");
+        fs::remove_file(root.join("android/build.gradle")).unwrap();
+        fs::remove_file(root.join("ios/Podfile")).unwrap();
+
+        assert_eq!(scan_paths(tmp.path(), &nested(true)), [root]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_scan_does_not_walk_into_artifact_dirs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempdir();
+        let root = tmp.path().join("web");
+        write(&root.join("package.json"), "{}");
+        let unreadable = root.join("node_modules/unreadable");
+        fs::create_dir_all(&unreadable).unwrap();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let paths = scan_paths(tmp.path(), &nested(true));
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(paths, [root]);
+    }
+
+    #[test]
+    fn nested_project_overlapping_parent_artifacts_is_skipped() {
+        let tmp = tempdir();
+        let root = tmp.path().join("mobile");
+        react_native_project(&root);
+
+        assert_eq!(scan_paths(tmp.path(), &nested(true)), [root]);
+    }
+
+    #[test]
+    fn nested_project_with_distinct_artifacts_is_kept() {
+        let tmp = tempdir();
+        let root = tmp.path().join("flutter");
+        write(&root.join("pubspec.yaml"), "");
+        write(&root.join("build/out"), "artifact");
+        write(&root.join("android/build.gradle.kts"), "");
+        write(&root.join("android/.gradle/cache"), "artifact");
+
+        assert_eq!(
+            scan_paths(tmp.path(), &nested(true)),
+            [root.clone(), root.join("android")]
+        );
+    }
+
+    #[test]
+    fn nested_python_and_jupyter_are_ignored() {
+        let tmp = tempdir();
+        let repo_dir = tmp.path().join("repo");
+        cargo_project(&repo_dir);
+        write(&repo_dir.join("tools/gen.py"), "");
+        write(&repo_dir.join("tools/__pycache__/gen.pyc"), "");
+        write(&repo_dir.join("notebooks/a.ipynb"), "{}");
+        write(&repo_dir.join("crates/a/build.py"), "");
+        write(&repo_dir.join("crates/a/Cargo.toml"), "[package]\n");
+
+        let projects: Vec<Project> = scan(&tmp.path(), &nested(true))
+            .filter_map(Result::ok)
+            .collect();
+        let mut found: Vec<(PathBuf, &str)> = projects
+            .iter()
+            .map(|p| (p.path.clone(), p.type_name()))
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                (repo_dir.clone(), "Cargo"),
+                (repo_dir.join("crates/a"), "Cargo")
+            ]
+        );
+    }
+
+    #[test]
+    fn top_level_python_project_is_still_found() {
+        let tmp = tempdir();
+        let root = tmp.path().join("scripts");
+        write(&root.join("main.py"), "");
+        write(&root.join("lib/util.py"), "");
+
+        assert_eq!(scan_paths(tmp.path(), &nested(true)), [root]);
+    }
+
+    #[test]
+    fn git_root_inside_project_is_not_nested() {
+        let tmp = tempdir();
+        let repo_dir = tmp.path().join("repo");
+        let sub = repo_dir.join("libs/sub");
+        cargo_project(&repo_dir);
+        fs::create_dir_all(sub.join(".git")).unwrap();
+        write(&sub.join("tool.py"), "");
+
+        assert_eq!(scan_paths(tmp.path(), &nested(true)), [repo_dir, sub]);
+    }
+
+    #[test]
+    fn nested_projects_inside_worktree() {
+        let tmp = tempdir();
+        let repo_dir = tmp.path().join("repo");
+        let w1 = repo_dir.join(".claude/worktrees/w1");
+        repo(&repo_dir);
+        linked_worktree(&repo_dir, "w1", &w1);
+        write(&w1.join("firmware/platformio.ini"), "");
+        write(&w1.join("tools/gen.py"), "");
+
+        assert_eq!(
+            scan_paths(tmp.path(), &options(true)),
+            [repo_dir, w1.clone(), w1.join("firmware")]
+        );
     }
 }

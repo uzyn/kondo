@@ -124,6 +124,7 @@ const SCAN_OPTIONS: &kondo_lib::ScanOptions = &kondo_lib::ScanOptions {
     follow_symlinks: false,
     same_file_system: false,
     worktrees: true,
+    nested: true,
 };
 
 fn setup(mut c: Commands) {
