@@ -1,7 +1,3 @@
-# Unreleased
-
-- Add PlatformIO support: projects with a `platformio.ini` have their `.pio` directory cleaned. A `platformio.ini` takes precedence over a `CMakeLists.txt` in the same directory, as in ESP-IDF projects.
-
 # 0.8 2023-12-19
 
 - Add .NET (C# and F#) support by @mrivnak in https://github.com/tbillington/kondo/pull/106
