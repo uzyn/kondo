@@ -114,6 +114,7 @@ fn skips_locked_worktrees() {
     let (tmp, repo) = cargo_repo();
     let x = add_worktree(&repo, ".claude/worktrees/x", &[]);
     add_worktree(&repo, ".claude/worktrees/y", &[]);
+    add_worktree(&repo, "../sibling", &[]);
     git(
         &repo,
         &[
@@ -124,6 +125,7 @@ fn skips_locked_worktrees() {
             ".claude/worktrees/y",
         ],
     );
+    git(&repo, &["worktree", "lock", "../sibling"]);
 
     assert_eq!(scan_paths(tmp.path()), [repo, x]);
 }

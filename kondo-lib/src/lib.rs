@@ -383,6 +383,17 @@ fn linked_worktrees(git_dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Whether `dir`, which has a `.git` file, is a linked worktree that git has locked.
+fn is_locked_worktree(dir: &Path) -> bool {
+    let Ok(dotgit) = fs::read_to_string(dir.join(".git")) else {
+        return false;
+    };
+    let Some(git_dir) = dotgit.trim().strip_prefix("gitdir:") else {
+        return false;
+    };
+    dir.join(git_dir.trim()).join("locked").exists()
+}
+
 #[cfg(unix)]
 fn device(path: &Path) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
@@ -513,12 +524,19 @@ impl Iterator for ProjectIter {
                 .filter_map(|rd| rd.ok())
                 .filter_map(|de| Some((de.file_name(), de.file_type().ok()?)))
                 .collect();
-            if self.options.worktrees
-                && listing
-                    .iter()
-                    .any(|(name, file_type)| file_type.is_dir() && name == ".git")
-            {
-                self.queue_worktrees(&entry.path().join(".git"));
+            if self.options.worktrees {
+                match listing.iter().find(|(name, _)| name == ".git") {
+                    Some((_, file_type)) if file_type.is_dir() => {
+                        self.queue_worktrees(&entry.path().join(".git"));
+                    }
+                    Some((_, file_type))
+                        if file_type.is_file() && is_locked_worktree(entry.path()) =>
+                    {
+                        self.it.skip_current_dir();
+                        continue;
+                    }
+                    _ => {}
+                }
             }
             for dir_entry in listing
                 .iter()
@@ -618,6 +636,7 @@ pub struct ScanOptions {
     pub same_file_system: bool,
     /// Also scan the linked git worktrees registered by repositories found under the scan
     /// root, even when they live in hidden directories or inside another project.
+    /// Locked worktrees are skipped, wherever they are found.
     pub worktrees: bool,
 }
 
@@ -876,6 +895,30 @@ mod tests {
         let meta = linked_worktree(&repo_dir, "w1", &repo_dir.join(".claude/worktrees/w1"));
         write(&meta.join("locked"), "claude agent agent-1234 (pid 42)");
 
+        assert_eq!(scan_paths(tmp.path(), &options(true)), [repo_dir]);
+    }
+
+    #[test]
+    fn locked_worktree_reached_by_walk() {
+        let tmp = tempdir();
+        let repo_dir = tmp.path().join("repo");
+        let feature = tmp.path().join("repo-feature");
+        let nested = tmp.path().join("repo-nested");
+        repo(&repo_dir);
+        let meta = linked_worktree(&repo_dir, "repo-feature", &feature);
+        write(&meta.join("locked"), "");
+        let meta = register(&repo_dir, "repo-nested", "../../../../repo-nested/.git");
+        write(&meta.join("locked"), "");
+        cargo_project(&nested.join("crates/a"));
+        write(
+            &nested.join(".git"),
+            "gitdir: ../repo/.git/worktrees/repo-nested\n",
+        );
+
+        assert_eq!(
+            scan_paths(tmp.path(), &options(false)),
+            [repo_dir.clone(), feature, nested.join("crates/a")]
+        );
         assert_eq!(scan_paths(tmp.path(), &options(true)), [repo_dir]);
     }
 
