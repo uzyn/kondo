@@ -32,6 +32,7 @@ const FILE_FSPROJ_SUFFIX: &str = ".fsproj";
 const FILE_TERRAFORM_HCL: &str = ".terraform.lock.hcl";
 const FILE_PROJECT_TURBOREPO: &str = "turbo.json";
 const FILE_PODFILE: &str = "Podfile";
+const FILE_PLATFORMIO_INI: &str = "platformio.ini";
 
 const PROJECT_CARGO_DIRS: [&str; 2] = ["target", ".xwin-cache"];
 const PROJECT_NODE_DIRS: [&str; 2] = ["node_modules", ".angular"];
@@ -93,6 +94,7 @@ const PROJECT_DOTNET_DIRS: [&str; 2] = ["bin", "obj"];
 const PROJECT_TURBOREPO_DIRS: [&str; 1] = [".turbo"];
 const PROJECT_TERRAFORM_DIRS: [&str; 1] = [".terraform"];
 const PROJECT_COCOAPODS_DIRS: [&str; 1] = ["Pods"];
+const PROJECT_PLATFORMIO_DIRS: [&str; 1] = [".pio"];
 
 const PROJECT_CARGO_NAME: &str = "Cargo";
 const PROJECT_NODE_NAME: &str = "Node";
@@ -118,6 +120,7 @@ const PROJECT_DOTNET_NAME: &str = ".NET";
 const PROJECT_TURBOREPO_NAME: &str = "Turborepo";
 const PROJECT_TERRAFORM_NAME: &str = "Terraform";
 const PROJECT_COCOAPODS_NAME: &str = "CocoaPods";
+const PROJECT_PLATFORMIO_NAME: &str = "PlatformIO";
 
 #[derive(Debug, Clone)]
 pub enum ProjectType {
@@ -145,6 +148,7 @@ pub enum ProjectType {
     Turborepo,
     Terraform,
     Cocoapods,
+    PlatformIO,
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +196,7 @@ impl Project {
             ProjectType::Turborepo => &PROJECT_TURBOREPO_DIRS,
             ProjectType::Terraform => &PROJECT_TERRAFORM_DIRS,
             ProjectType::Cocoapods => &PROJECT_COCOAPODS_DIRS,
+            ProjectType::PlatformIO => &PROJECT_PLATFORMIO_DIRS,
         }
     }
 
@@ -311,6 +316,7 @@ impl Project {
             ProjectType::Turborepo => PROJECT_TURBOREPO_NAME,
             ProjectType::Terraform => PROJECT_TERRAFORM_NAME,
             ProjectType::Cocoapods => PROJECT_COCOAPODS_NAME,
+            ProjectType::PlatformIO => PROJECT_PLATFORMIO_NAME,
         }
     }
 
@@ -555,7 +561,13 @@ impl Iterator for ProjectIter {
                     FILE_CABAL_HASKELL => Some(ProjectType::Cabal),
                     FILE_SBT_BUILD => Some(ProjectType::SBT),
                     FILE_MVN_BUILD => Some(ProjectType::Maven),
-                    FILE_CMAKE_BUILD => Some(ProjectType::CMake),
+                    FILE_CMAKE_BUILD => {
+                        if dir_contains_file(entry.path(), FILE_PLATFORMIO_INI) {
+                            Some(ProjectType::PlatformIO)
+                        } else {
+                            Some(ProjectType::CMake)
+                        }
+                    }
                     FILE_COMPOSER_JSON => Some(ProjectType::Composer),
                     FILE_PUBSPEC_YAML => Some(ProjectType::Pub),
                     FILE_PIXI_PACKAGE => Some(ProjectType::Pixi),
@@ -568,6 +580,7 @@ impl Iterator for ProjectIter {
                     FILE_PROJECT_TURBOREPO => Some(ProjectType::Turborepo),
                     FILE_TERRAFORM_HCL => Some(ProjectType::Terraform),
                     FILE_PODFILE => Some(ProjectType::Cocoapods),
+                    FILE_PLATFORMIO_INI => Some(ProjectType::PlatformIO),
                     file_name if file_name.ends_with(FILE_UNREAL_SUFFIX) => {
                         Some(ProjectType::Unreal)
                     }
@@ -691,7 +704,13 @@ pub fn clean(project_path: &str) -> Result<(), Box<dyn error::Error>> {
                 FILE_CABAL_HASKELL => Some(ProjectType::Cabal),
                 FILE_SBT_BUILD => Some(ProjectType::SBT),
                 FILE_MVN_BUILD => Some(ProjectType::Maven),
-                FILE_CMAKE_BUILD => Some(ProjectType::CMake),
+                FILE_CMAKE_BUILD => {
+                    if dir_contains_file(path::Path::new(project_path), FILE_PLATFORMIO_INI) {
+                        Some(ProjectType::PlatformIO)
+                    } else {
+                        Some(ProjectType::CMake)
+                    }
+                }
                 FILE_COMPOSER_JSON => Some(ProjectType::Composer),
                 FILE_PUBSPEC_YAML => Some(ProjectType::Pub),
                 FILE_PIXI_PACKAGE => Some(ProjectType::Pixi),
@@ -701,6 +720,7 @@ pub fn clean(project_path: &str) -> Result<(), Box<dyn error::Error>> {
                 FILE_GODOT_4_PROJECT => Some(ProjectType::Godot4),
                 FILE_TERRAFORM_HCL => Some(ProjectType::Terraform),
                 FILE_PODFILE => Some(ProjectType::Cocoapods),
+                FILE_PLATFORMIO_INI => Some(ProjectType::PlatformIO),
                 _ => None,
             };
             if let Some(project_type) = p_type {
